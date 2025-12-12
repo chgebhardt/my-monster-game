@@ -1,5 +1,3 @@
-# Complete your game here
-
 # * Concept
 #   You play as the monster. Coins are "packages" you need to collect and deliver to the door. 
 #   Robots act as patrolling obstacles that try to catch you. 
