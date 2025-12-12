@@ -1,3 +1,5 @@
+# Complete your game here
+
 # * Concept
 #   You play as the monster. Coins are "packages" you need to collect and deliver to the door. 
 #   Robots act as patrolling obstacles that try to catch you. 
@@ -261,11 +263,14 @@ class GameApplication:
         self.last_robot_update_time = 0  # reset robot timer  
         
     def get_level_params(self):
-   
-        num_robots     = 1 + (self.level_num - 1) // 3        # increase robots with level
-        robot_speed_ms = 2000 - 100*self.level_num            # robot speed scaling
-        num_coins      = 5 + 2 * ((self.level_num - 1) // 5)  # increase number of coins
 
+        # linear growth with saturation
+        num_robots = min(5, 1 + (self.level_num - 1) // 2)  # 1 robot at level 1, +1 every 2 levels
+        num_coins  = min(10, 5 + 2 * ((self.level_num - 1) // 3))  # 5 coins at level 1, +2 every 3 levels
+
+        # robot speed with lower limit
+        robot_speed_ms = max(500, 2000 - 100 * self.level_num)
+   
         return num_robots, num_coins, robot_speed_ms
 
     def generate_level_map(self):
