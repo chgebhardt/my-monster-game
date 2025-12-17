@@ -6,7 +6,7 @@
 #   The goal is to gather coins and reach the door without getting caught.
 
 import pygame
-from random import randint, choice
+from random import randint, choice, sample
 from math import sqrt
 
 class Level:
@@ -28,77 +28,81 @@ class Level:
         self.level_num          = level_num                
 
         # The map[y][x] contains WALL, EMPTY, COIN, or DOOR
-        self.level_map = self.generate()
+        self.generate()
 
     def generate(self):
         # create empty map
-        win_size_x, win_size_y = self.win_size
-        level_map              = [[self.EMPTY for _ in range(win_size_x)] for _ in range(win_size_y)]
+        self.level_map = self._create_empty_map()
 
         # add external walls
-        self.add_external_walls(level_map)
+        self._add_external_walls()
 
         # add internal walls
-        self.place_items(level_map, self.WALL, count = self.num_internal_walls)
+        self._place_items(self.WALL, count = self.num_internal_walls)
 
         # add exit door
-        self.place_items(level_map, self.DOOR, count = 1)
+        self._place_items(self.DOOR, count = 1)
 
         # add coins
-        self.place_items(level_map, self.COIN, count = self.num_coins)
+        self._place_items(self.COIN, count = self.num_coins)
 
-        return level_map
-        
+    def _create_empty_map(self):
+        w, h = self.win_size
+        return [[self.EMPTY for _ in range(w)] for _ in range(h)]
 
-    def add_external_walls(self, level_map):
-        win_size_x, win_size_y = self.win_size
-        for y in range(win_size_y):
-            for x in range(win_size_x):
-                if y == 0 or y == win_size_y - 1 or x == 0 or x == win_size_x - 1:
-                    level_map[y][x] = self.WALL
+    def _in_bounds(self, x, y):
+        w, h = self.win_size
+        return 0 <= x < w and 0 <= y < h
 
+    def _get_tile(self, x, y):
+        if not self._in_bounds(x, y):
+            return None
+        return self.level_map[y][x]
 
-    def place_items(self, level_map, symbol, count):
-        win_size_x, win_size_y = self.win_size
-        empty_positions = [(x, y) for y in range(1, win_size_y - 1)
-                                  for x in range(1, win_size_x - 1)
-                                  if level_map[y][x] == self.EMPTY]
-        
-        if count > len(empty_positions):
-            raise ValueError(f"Not enough empty space to place {count} items of type '{symbol}'")
-
-        for _ in range(count):
-            index = randint(0, len(empty_positions) - 1)
-            x, y = empty_positions.pop(index)
-            level_map[y][x] = symbol
+    def _set_tile(self, x, y, value):
+        if self._in_bounds(x, y):
+            self.level_map[y][x] = value
 
     def is_not_wall(self, position):
-        """
-        Return True if a cell is not a wall.
-        """
-        x, y                   = position
-        win_size_x, win_size_y = self.win_size
-        if 0 <= x < win_size_x and 0 <= y < win_size_y:
-            return self.level_map[y][x] != self.WALL
-        return False
-
-    def is_coin(self, position: tuple):
         x, y = position
-        return self.level_map[y][x] == self.COIN
+        return self._get_tile(x, y) != self.WALL
 
-    def is_door(self, position: tuple):
+    def is_coin(self, position):
         x, y = position
-        return self.level_map[y][x] == self.DOOR
+        return self._get_tile(x, y) == self.COIN
+
+    def is_door(self, position):
+        x, y = position
+        return self._get_tile(x, y) == self.DOOR
+
+    def _get_empty_positions(self):
+        w, h = self.win_size
+        return [(x, y) for y in range(1, h - 1) for x in range(1, w - 1) if self.level_map[y][x] == self.EMPTY]
+
+    def _place_items(self, symbol, count):
+        empty = self._get_empty_positions()
+        if count > len(empty):
+            raise ValueError(f"Not enough space for {symbol}")
+
+        for x, y in sample(empty, count):
+            self.level_map[y][x] = symbol
+
+    def _add_external_walls(self):
+        w, h = self.win_size
+        for y in range(h):
+            for x in range(w):
+                if y == 0 or y == h - 1 or x == 0 or x == w - 1:
+                    self.level_map[y][x] = self.WALL
 
     def __str__(self):
         """
         quick and dirty print function of the level map
         """
-        output = []
-        print(f"Level {self.level_num}")
+        lines = [f"Level {self.level_num}"]
         for row in self.level_map:
-            output.append(" ".join(ch if ch != ' ' else '_' for ch in row))
-        return "\n".join(output)
+            lines.append(" ".join(ch if ch != self.EMPTY else '_' for ch in row))
+        return "\n".join(lines)
+
 
 
 class Monster:
@@ -222,7 +226,7 @@ class GameApplication:
         
         while self.running:
             
-            print(f"Monster at {(self.monster.x, self.monster.y)}, robots at {[(r.x, r.y) for r in self.robots]}")
+            # HERE: print(f"Monster at {(self.monster.x, self.monster.y)}, robots at {[(r.x, r.y) for r in self.robots]}")
 
             dx, dy, restart, quit_game = self.input_handler.process_events()
 
@@ -570,7 +574,10 @@ class GameApplication:
             
             
 if __name__ == "__main__":
-    game = GameApplication()
-    game.run()
+    # game = GameApplication()
+    # game.run()
+
+    level = Level(win_size=(20,9), num_internal_walls = 15, num_coins=5, level_num=1)
+    print(level)
 
     
