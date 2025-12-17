@@ -16,24 +16,24 @@ class Level:
           -> maybe use flood fill / BFS / DFS to check that all empty tiles are accessible after an internal wall tile was placed?
     """ 
 
-    WALL = '#'
+    WALL  = '#'
     EMPTY = ' '
-    COIN = 'C'
-    DOOR = 'D'
+    COIN  = 'C'
+    DOOR  = 'D'
 
     def __init__(self, win_size: tuple, num_internal_walls: int, num_coins: int, level_num: int):
-        self.win_size_x, self.win_size_y = win_size
-        self.num_internal_walls          = num_internal_walls
-        self.num_coins                   = num_coins
-        self.level_num                   = level_num                
+        self.win_size           = win_size
+        self.num_internal_walls = num_internal_walls
+        self.num_coins          = num_coins
+        self.level_num          = level_num                
 
         # The map[y][x] contains WALL, EMPTY, COIN, or DOOR
         self.level_map = self.generate()
 
     def generate(self):
         # create empty map
-        level_map = [[self.EMPTY for _ in range(self.win_size_x)]
-                     for _ in range(self.win_size_y)]
+        win_size_x, win_size_y = self.win_size
+        level_map              = [[self.EMPTY for _ in range(win_size_x)] for _ in range(win_size_y)]
 
         # add external walls
         self.add_external_walls(level_map)
@@ -51,15 +51,17 @@ class Level:
         
 
     def add_external_walls(self, level_map):
-        for y in range(self.win_size_y):
-            for x in range(self.win_size_x):
-                if y == 0 or y == self.win_size_y - 1 or x == 0 or x == self.win_size_x - 1:
+        win_size_x, win_size_y = self.win_size
+        for y in range(win_size_y):
+            for x in range(win_size_x):
+                if y == 0 or y == win_size_y - 1 or x == 0 or x == win_size_x - 1:
                     level_map[y][x] = self.WALL
 
 
     def place_items(self, level_map, symbol, count):
-        empty_positions = [(x, y) for y in range(1, self.win_size_y - 1)
-                                  for x in range(1, self.win_size_x - 1)
+        win_size_x, win_size_y = self.win_size
+        empty_positions = [(x, y) for y in range(1, win_size_y - 1)
+                                  for x in range(1, win_size_x - 1)
                                   if level_map[y][x] == self.EMPTY]
         
         if count > len(empty_positions):
@@ -74,8 +76,9 @@ class Level:
         """
         Return True if a cell is not a wall.
         """
-        x, y = position
-        if 0 <= x < self.win_size_x and 0 <= y < self.win_size_y:
+        x, y                   = position
+        win_size_x, win_size_y = self.win_size
+        if 0 <= x < win_size_x and 0 <= y < win_size_y:
             return self.level_map[y][x] != self.WALL
         return False
 
@@ -218,6 +221,9 @@ class GameApplication:
         self.start_level()
         
         while self.running:
+            
+            print(f"Monster at {(self.monster.x, self.monster.y)}, robots at {[(r.x, r.y) for r in self.robots]}")
+
             dx, dy, restart, quit_game = self.input_handler.process_events()
 
             # quits game
@@ -283,9 +289,8 @@ class GameApplication:
 
     def initiate_window(self):
         # intiates window for display (each tile is of size (tile_scale_px x tile_scale_px) )
-        self.map_width     = self.level.win_size_x
-        self.map_height    = self.level.win_size_y
-        self.tile_scale_px = 100
+        self.map_width, self.map_height     = self.level.win_size
+        self.tile_scale_px                  = 100
 
         window_height = self.tile_scale_px * self.map_height
         window_width  = self.tile_scale_px * self.map_width
