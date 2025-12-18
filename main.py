@@ -505,11 +505,11 @@ class GameApplication:
     def __init__(self):
         pygame.init()
 
-        self.clock                  = pygame.time.Clock()
-        self.input_handler          = InputHandler()
-        self.running                = True
-        self.level_manager          = LevelManager(map_size=(20,10), internal_walls=15)
-        self.last_robot_update_time = 0
+        self.clock                      = pygame.time.Clock()
+        self.input_handler              = InputHandler()
+        self.running                    = True
+        self.level_manager              = LevelManager(map_size=(20,10), internal_walls=15)
+        self.last_robot_update_time     = 0
 
         # Initialize window & renderer
         self.tile_scale_px              = 100
