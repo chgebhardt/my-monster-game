@@ -143,25 +143,30 @@ class Robot:
     Robot enemy class.
     """
     def __init__(self, position: tuple, robot_speed_ms: int):
-        self.x, self.y        = position
-        self.speed_ms         = robot_speed_ms
-        self.last_update_time = 0
+        self.position          = position
+        self.speed_ms          = robot_speed_ms
+        self.last_move_time_ms = 0
 
         self.image = pygame.image.load("robot.png")
 
     @property
-    def width(self):
-        return self.image.get_width()
+    def x(self):
+        return self.position[0]
 
     @property
-    def height(self):
-        return self.image.get_height()
+    def y(self):
+        return self.position[1]
+
+    @property
+    def size(self):
+        return self.image.get_size()
 
     def propose_move(self, dx: int, dy: int):
-        """
-        returns the proposed new position without changing self.x and self.y themselves.
-        """
-        return self.x + dx, self.y + dy
+        x, y = self.position
+        return x + dx, y + dy
+
+    def move_to(self, position: tuple):
+        self.position = position
 
 
 class InputHandler:
@@ -231,7 +236,7 @@ class GameApplication:
         
         while self.running:
             
-            print(f"Monster at {self.monster.position}, robots at {[(r.x, r.y) for r in self.robots]}")
+            print(f"Monster at {self.monster.position}, robots at {[r.position for r in self.robots]}")
 
             dx, dy, restart, quit_game = self.input_handler.process_events()
 
@@ -396,9 +401,10 @@ class GameApplication:
                         )
 
     def draw_robots(self):
-        for robot in self.robots: 
-            self.window.blit(robot.image, (robot.x*self.tile_scale_px + (self.tile_scale_px - robot.image.get_width())/2, 
-                                           robot.y*self.tile_scale_px + (self.tile_scale_px - robot.image.get_height())/2)
+        for robot in self.robots:
+            robot_x, robot_y = robot.position
+            self.window.blit(robot.image, (robot_x*self.tile_scale_px + (self.tile_scale_px - robot.image.get_width())/2, 
+                                           robot_y*self.tile_scale_px + (self.tile_scale_px - robot.image.get_height())/2)
                             )
 
     def draw_title_screen(self):
@@ -514,7 +520,7 @@ class GameApplication:
             self.level_finished = True
 
         # monster collides with robots
-        robot_positions = {(robot.x, robot.y) for robot in self.robots}
+        robot_positions = {robot.position for robot in self.robots}
         if proposed_position in robot_positions:
             # Monster is caught by robot
             self.monster.is_caught = True
@@ -540,8 +546,9 @@ class GameApplication:
 
             if valid_positions:
                 monster_x, monster_y = self.monster.position
+                
                 # move towards monster
-                robot.x, robot.y = min(
+                robot.position = min(
                     valid_positions,
                     key=lambda pos: sqrt((monster_x - pos[0])**2 + (monster_y - pos[1])**2)
                 )
@@ -551,7 +558,7 @@ class GameApplication:
                     for dx, dy in possible_robot_moves
                     if self.validated_position(robot.propose_move(dx, dy))]
                 if fallback_positions:
-                    robot.x, robot.y = choice(fallback_positions)
+                   robot.position = choice(fallback_positions)
 
             # a robot caught the monster    
             if proposed_position == (self.monster.position):
@@ -572,7 +579,7 @@ class GameApplication:
             return False
         
         # Avoid other robots
-        other_robots = {(r.x, r.y) for r in self.robots if r != robot}
+        other_robots = {r.position for r in self.robots if r != robot}
         if position in other_robots:
             return False
         return True
