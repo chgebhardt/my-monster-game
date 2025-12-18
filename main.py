@@ -28,9 +28,9 @@ class Level:
         self.level_num          = level_num                
 
         # The map[y][x] contains WALL, EMPTY, COIN, or DOOR
-        self.generate()
+        self._generate_map()
 
-    def generate(self):
+    def _generate_map(self):
         # create empty map
         self.level_map = self._create_empty_map()
 
@@ -63,18 +63,6 @@ class Level:
         if self._in_bounds(x, y):
             self.level_map[y][x] = value
 
-    def is_not_wall(self, position):
-        x, y = position
-        return self._get_tile(x, y) != self.WALL
-
-    def is_coin(self, position):
-        x, y = position
-        return self._get_tile(x, y) == self.COIN
-
-    def is_door(self, position):
-        x, y = position
-        return self._get_tile(x, y) == self.DOOR
-
     def _get_empty_positions(self):
         w, h = self.win_size
         return [(x, y) for y in range(1, h - 1) for x in range(1, w - 1) if self.level_map[y][x] == self.EMPTY]
@@ -94,6 +82,18 @@ class Level:
                 if y == 0 or y == h - 1 or x == 0 or x == w - 1:
                     self.level_map[y][x] = self.WALL
 
+    def is_not_wall(self, position):
+        x, y = position
+        return self._get_tile(x, y) != self.WALL
+
+    def is_coin(self, position):
+        x, y = position
+        return self._get_tile(x, y) == self.COIN
+
+    def is_door(self, position):
+        x, y = position
+        return self._get_tile(x, y) == self.DOOR
+    
     def __str__(self):
         """
         quick and dirty print function of the level map
@@ -104,32 +104,38 @@ class Level:
         return "\n".join(lines)
 
 
-
 class Monster:
-    """
-    Monster class for player movement and coin carrying.
-    """
     def __init__(self, position: tuple):
-        self.x, self.y      = position
-        self.coins_carried  = 0
-        self.caught         = False
+        self.position      = position
+        self.coins_carried = 0
+        self.is_caught     = False
 
         self.image = pygame.image.load("monster.png")
 
+    @property
+    def x(self):
+        return self.position[0]
 
     @property
-    def width(self):
-        return self.image.get_width() 
+    def y(self):
+        return self.position[1]
 
     @property
-    def height(self):
-        return self.image.get_height()
+    def size(self):
+        return self.image.get_size()
 
     def propose_move(self, dx: int, dy: int):
-        """
-        returns the proposed new position without changing self.x and self.y themselves.
-        """
-        return self.x + dx, self.y + dy
+        x, y = self.position
+        return x + dx, y + dy
+
+    def move_to(self, position: tuple):
+        self.position = position
+
+    def collect_coin(self):
+        self.coins_carried += 1
+
+    def mark_caught(self):
+        self.is_caught = True
 
 
 class Robot:
@@ -142,7 +148,6 @@ class Robot:
         self.last_update_time = 0
 
         self.image = pygame.image.load("robot.png")
-
 
     @property
     def width(self):
@@ -226,7 +231,7 @@ class GameApplication:
         
         while self.running:
             
-            # HERE: print(f"Monster at {(self.monster.x, self.monster.y)}, robots at {[(r.x, r.y) for r in self.robots]}")
+            print(f"Monster at {self.monster.position}, robots at {[(r.x, r.y) for r in self.robots]}")
 
             dx, dy, restart, quit_game = self.input_handler.process_events()
 
@@ -320,7 +325,7 @@ class GameApplication:
         - Cannot overlap with other robots
         """
         self.robots = []
-        used_positions = {(self.monster.x,   self.monster.y)}
+        used_positions = {self.monster.position}
 
         while len(self.robots) < self.num_robots:
             initial_position = (
@@ -346,7 +351,7 @@ class GameApplication:
         self.draw_robots()
         self.draw_window_text()
 
-        if self.monster.caught:
+        if self.monster.is_caught:
             self.draw_end_text()
             
         pygame.display.flip()
@@ -385,8 +390,9 @@ class GameApplication:
                 pygame.draw.rect(self.window, (128, 128, 128), rect, width=2)
 
     def draw_monster(self):
-        self.window.blit(self.monster.image, (self.monster.x*self.tile_scale_px + (self.tile_scale_px - self.monster.image.get_width())/2, 
-                                              self.monster.y*self.tile_scale_px + (self.tile_scale_px - self.monster.image.get_height())/2)
+        monster_x, monster_y = self.monster.position
+        self.window.blit(self.monster.image, (monster_x*self.tile_scale_px + (self.tile_scale_px - self.monster.image.get_width())/2, 
+                                              monster_y*self.tile_scale_px + (self.tile_scale_px - self.monster.image.get_height())/2)
                         )
 
     def draw_robots(self):
@@ -491,13 +497,11 @@ class GameApplication:
         - Door/level completion
         - Collision with robots
         """
-
-        proposed_position = self.monster.propose_move(dx, dy)
+        proposed_position    = self.monster.propose_move(dx, dy)
         
         # validate move
         if self.is_valid_monster_position(proposed_position):
-            self.monster.x += dx
-            self.monster.y += dy
+            self.monster.move_to(proposed_position)
 
         # coin collection (Coins are not moving and can therefore be checked directly in the instance of the Level class)
         if self.level.is_coin(proposed_position):
@@ -513,7 +517,7 @@ class GameApplication:
         robot_positions = {(robot.x, robot.y) for robot in self.robots}
         if proposed_position in robot_positions:
             # Monster is caught by robot
-            self.monster.caught = True
+            self.monster.is_caught = True
 
     def update_robots(self):
         """
@@ -535,10 +539,11 @@ class GameApplication:
                     valid_positions.append(proposed_position)
 
             if valid_positions:
+                monster_x, monster_y = self.monster.position
                 # move towards monster
                 robot.x, robot.y = min(
                     valid_positions,
-                    key=lambda pos: sqrt((self.monster.x - pos[0])**2 + (self.monster.y - pos[1])**2)
+                    key=lambda pos: sqrt((monster_x - pos[0])**2 + (monster_y - pos[1])**2)
                 )
             else:
                 # robot is stuck; optionally pick a random valid move if any
@@ -549,9 +554,9 @@ class GameApplication:
                     robot.x, robot.y = choice(fallback_positions)
 
             # a robot caught the monster    
-            if proposed_position == (self.monster.x, self.monster.y):
+            if proposed_position == (self.monster.position):
                 # Monster is caught by robot
-                self.monster.caught = True
+                self.monster.is_caught = True
                 
     def is_valid_monster_position(self, position: tuple):
         """
@@ -574,10 +579,10 @@ class GameApplication:
             
             
 if __name__ == "__main__":
-    # game = GameApplication()
-    # game.run()
+    game = GameApplication()
+    game.run()
 
-    level = Level(win_size=(20,9), num_internal_walls = 15, num_coins=5, level_num=1)
-    print(level)
+    # level = Level(win_size=(20,9), num_internal_walls = 15, num_coins=5, level_num=1)
+    # print(level)
 
     
