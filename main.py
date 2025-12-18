@@ -93,7 +93,30 @@ class Level:
     def is_door(self, position):
         x, y = position
         return self._get_tile(x, y) == self.DOOR
+
+    def remove_coin(self, position):
+        x, y = position
+        self.level_map[y][x] = self.EMPTY
+
+    def open_door(self, position):
+        x, y = position
+        self.level_map[y][x] = self.EMPTY
     
+    def is_walkable(self, position: tuple) -> bool:
+        return self.is_not_wall(position)
+
+    def is_spawnable(self, position: tuple) -> bool:
+        """
+        Return True if a robot or monster can spawn here (ignoring entities).
+        """
+        x, y = position
+        if not self.is_not_wall(position):
+            return False
+        if self.is_coin(position) or self.is_door(position):
+            return False
+        return True
+
+        
     def __str__(self):
         """
         quick and dirty print function of the level map
@@ -203,6 +226,90 @@ class InputHandler:
         return dx, dy, restart, quit_game
 
 
+class GameState:
+    def __init__(self, level, monster, robots):
+        self.level          = level
+        self.monster        = monster
+        self.robots         = robots
+        self.level_finished = False
+
+    # -------------------- Monster Logic -------------------- #
+    def try_move_monster(self, dx: int, dy: int):
+        proposed_position = self.monster.propose_move(dx, dy)
+
+        # validate move
+        if self.is_valid_monster_position(proposed_position):
+            self.monster.move_to(proposed_position)
+
+        # coin collection
+        if self.level.is_coin(proposed_position):
+            self.monster.coins_carried += 1
+            self.level.remove_coin(proposed_position)
+
+        # door / level completion
+        if (self.level.is_door(proposed_position) and self.monster.coins_carried == self.level.num_coins):
+            self.level.open_door(proposed_position)
+            self.level_finished = True
+
+        # collision with robots
+        if proposed_position in {r.position for r in self.robots}:
+            self.monster.is_caught = True
+
+    # -------------------- Robot Logic -------------------- #
+    def update_robots(self):
+        """
+        Moves all robots:
+        - Propose moves
+        - Validate against walls, doors, other robots
+        - Update positions
+        - Detect if monster is caught
+        """
+        for robot in self.robots:
+            possible_moves = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+
+            valid_positions = []
+            fallback_positions = []
+
+            for dx, dy in possible_moves:
+                pos = robot.propose_move(dx, dy)
+
+                if self.level.is_not_wall(pos):
+                    fallback_positions.append(pos)
+
+                if self.is_valid_robot_position(pos, robot):
+                    valid_positions.append(pos)
+
+            if valid_positions:
+                mx, my = self.monster.position
+                # move towards monster
+                robot.move_to( min(valid_positions, key=lambda p: (mx - p[0]) ** 2 + (my - p[1]) ** 2) )
+            elif fallback_positions:
+                robot.move_to(choice(fallback_positions))
+
+            # did robot catch a monster?
+            if robot.position == self.monster.position:
+                self.monster.is_caught = True
+
+    
+    # -------------------- Validation -------------------- #
+    def is_valid_monster_position(self, position: tuple) -> bool:
+        """
+        Monster can move anywhere except walls.
+        """
+        return self.level.is_not_wall(position)
+
+    def is_valid_robot_position(self, position: tuple, robot) -> bool:
+        """
+        Robot cannot move into walls, doors, coins, or other robots.
+        """
+        if ( not self.level.is_not_wall(position) or self.level.is_coin(position) or self.level.is_door(position) ):
+            return False
+
+        # Avoid other robots
+        other_positions = {r.position for r in self.robots if r is not robot}
+        return position not in other_positions
+
+
 class GameApplication:
     '''
     GameApplication class for game state management.
@@ -212,13 +319,9 @@ class GameApplication:
 
         self.clock                  = pygame.time.Clock()
         
-        self.level                  = None
         self.level_num              = 0
-        self.level_finished         = False 
-        self.monster                = None
-        self.robots                 = []
         self.last_robot_update_time = 0 
-
+        
         self.input_handler          = InputHandler()
         
         self.running                = True
@@ -227,6 +330,7 @@ class GameApplication:
 
     def run(self):
         
+        # draw title screen
         self.draw_title_screen()
 
         # start first level
@@ -250,19 +354,22 @@ class GameApplication:
                 continue
 
             # regular level completion
-            if self.level_finished:
+            if self.gamestate.level_finished:
                 self.start_level()
                 continue
 
             current_time = pygame.time.get_ticks()
 
-            self.draw_main()
-            self.update_monster(dx, dy)
-
+            self.gamestate.try_move_monster(dx, dy)
+            
             # delay robot movement
             if current_time - self.last_robot_update_time >= self.robot_speed_ms:
-                self.update_robots()
+                self.gamestate.update_robots()
                 self.last_robot_update_time = current_time
+            
+            self.draw_main()
+
+            self.clock.tick(30)
 
                 
     # -------------------- Level Management -------------------- #
@@ -276,8 +383,9 @@ class GameApplication:
 
         self.seed_monster()
         self.seed_robots()
+        
+        self.gamestate = GameState(level=self.level, monster=self.monster, robots=self.robots)
 
-        self.level_finished         = False
         self.last_robot_update_time = 0  # reset robot timer  
         
     def get_level_params(self):
@@ -317,10 +425,10 @@ class GameApplication:
         while True:
             initial_position = (randint(0, self.map_width - 1), randint(0, self.map_height - 1))
             
-            if self.is_valid_monster_position(initial_position):
+            if self.level.is_walkable(initial_position):
                 self.monster = Monster(position=initial_position)
                 break
-        
+
     def seed_robots(self):
         """
         Place robots at valid positions:
@@ -331,17 +439,12 @@ class GameApplication:
         used_positions = {self.monster.position}
 
         while len(self.robots) < self.num_robots:
-            initial_position = (
-                randint(0, self.map_width - 1),
-                randint(0, self.map_height - 1)
-            )
+            pos = ( randint(0, self.map_width - 1), randint(0, self.map_height - 1) )
 
-            if (self.is_valid_robot_position(initial_position, None)  # temporarily pass None for robot
-                and initial_position not in used_positions):
-                
-                robot = Robot(position=initial_position, robot_speed_ms=self.robot_speed_ms)
+            if self.level.is_spawnable(pos) and pos not in used_positions:
+                robot = Robot(position=pos, robot_speed_ms=self.robot_speed_ms)
                 self.robots.append(robot)
-                used_positions.add(initial_position)
+                used_positions.add(pos)
 
     # -------------------- Drawing -------------------- #
 
@@ -493,94 +596,94 @@ class GameApplication:
 
 # -------------------- Game Logic -------------------- #
 
-    def update_monster(self, dx: int, dy: int):
-        """
-        Handles monster movement:
-        - Validate move
-        - Coin collection
-        - Door/level completion
-        - Collision with robots
-        """
-        proposed_position    = self.monster.propose_move(dx, dy)
+    # def update_monster(self, dx: int, dy: int):
+    #     """
+    #     Handles monster movement:
+    #     - Validate move
+    #     - Coin collection
+    #     - Door/level completion
+    #     - Collision with robots
+    #     """
+    #     proposed_position    = self.monster.propose_move(dx, dy)
         
-        # validate move
-        if self.is_valid_monster_position(proposed_position):
-            self.monster.move_to(proposed_position)
+    #     # validate move
+    #     if self.is_valid_monster_position(proposed_position):
+    #         self.monster.move_to(proposed_position)
 
-        # coin collection (Coins are not moving and can therefore be checked directly in the instance of the Level class)
-        if self.level.is_coin(proposed_position):
-            self.monster.coins_carried += 1
-            self.level.level_map[proposed_position[1]][proposed_position[0]] = ' '
+    #     # coin collection (Coins are not moving and can therefore be checked directly in the instance of the Level class)
+    #     if self.level.is_coin(proposed_position):
+    #         self.monster.coins_carried += 1
+    #         self.level.level_map[proposed_position[1]][proposed_position[0]] = ' '
         
-        # Door/level completion (Doors are not moving and can therefore be checked directly in the instance of the Level class)
-        if self.level.is_door(proposed_position) and (self.monster.coins_carried == self.level.num_coins):
-            self.level.level_map[proposed_position[1]][proposed_position[0]] = ' '
-            self.level_finished = True
+    #     # Door/level completion (Doors are not moving and can therefore be checked directly in the instance of the Level class)
+    #     if self.level.is_door(proposed_position) and (self.monster.coins_carried == self.level.num_coins):
+    #         self.level.level_map[proposed_position[1]][proposed_position[0]] = ' '
+    #         self.level_finished = True
 
-        # monster collides with robots
-        robot_positions = {robot.position for robot in self.robots}
-        if proposed_position in robot_positions:
-            # Monster is caught by robot
-            self.monster.is_caught = True
+    #     # monster collides with robots
+    #     robot_positions = {robot.position for robot in self.robots}
+    #     if proposed_position in robot_positions:
+    #         # Monster is caught by robot
+    #         self.monster.is_caught = True
 
-    def update_robots(self):
-        """
-        Moves all robots:
-        - Propose moves
-        - Validate against walls, doors, other robots
-        - Update positions
-        - Detect if monster is caught
-        """
-        for robot in self.robots:
-            possible_robot_moves = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    # def update_robots(self):
+    #     """
+    #     Moves all robots:
+    #     - Propose moves
+    #     - Validate against walls, doors, other robots
+    #     - Update positions
+    #     - Detect if monster is caught
+    #     """
+    #     for robot in self.robots:
+    #         possible_robot_moves = [(0, 1), (0, -1), (1, 0), (-1, 0)]
 
-            valid_positions = []
+    #         valid_positions = []
 
-            for dx, dy in possible_robot_moves:
-                proposed_position = robot.propose_move(dx, dy)
+    #         for dx, dy in possible_robot_moves:
+    #             proposed_position = robot.propose_move(dx, dy)
 
-                if self.is_valid_robot_position(proposed_position, robot):
-                    valid_positions.append(proposed_position)
+    #             if self.is_valid_robot_position(proposed_position, robot):
+    #                 valid_positions.append(proposed_position)
 
-            if valid_positions:
-                monster_x, monster_y = self.monster.position
+    #         if valid_positions:
+    #             monster_x, monster_y = self.monster.position
                 
-                # move towards monster
-                robot.position = min(
-                    valid_positions,
-                    key=lambda pos: sqrt((monster_x - pos[0])**2 + (monster_y - pos[1])**2)
-                )
-            else:
-                # robot is stuck; optionally pick a random valid move if any
-                fallback_positions = [robot.propose_move(dx, dy)
-                    for dx, dy in possible_robot_moves
-                    if self.validated_position(robot.propose_move(dx, dy))]
-                if fallback_positions:
-                   robot.position = choice(fallback_positions)
+    #             # move towards monster
+    #             robot.position = min(
+    #                 valid_positions,
+    #                 key=lambda pos: sqrt((monster_x - pos[0])**2 + (monster_y - pos[1])**2)
+    #             )
+    #         else:
+    #             # robot is stuck; optionally pick a random valid move if any
+    #             fallback_positions = [robot.propose_move(dx, dy)
+    #                 for dx, dy in possible_robot_moves
+    #                 if self.validated_position(robot.propose_move(dx, dy))]
+    #             if fallback_positions:
+    #                robot.position = choice(fallback_positions)
 
-            # a robot caught the monster    
-            if proposed_position == (self.monster.position):
-                # Monster is caught by robot
-                self.monster.is_caught = True
+    #         # a robot caught the monster    
+    #         if proposed_position == (self.monster.position):
+    #             # Monster is caught by robot
+    #             self.monster.is_caught = True
                 
-    def is_valid_monster_position(self, position: tuple):
-        """
-        Monster can move anywhere except walls.
-        """
-        return self.level.is_not_wall(position)
+    # def is_valid_monster_position(self, position: tuple):
+    #     """
+    #     Monster can move anywhere except walls.
+    #     """
+    #     return self.level.is_not_wall(position)
 
-    def is_valid_robot_position(self, position: tuple, robot: "Robot"):
-        """
-        Robot cannot move into walls, doors, coins, or other robots.
-        """
-        if not self.level.is_not_wall(position) or self.level.is_coin(position) or self.level.is_door(position):
-            return False
+    # def is_valid_robot_position(self, position: tuple, robot: "Robot"):
+    #     """
+    #     Robot cannot move into walls, doors, coins, or other robots.
+    #     """
+    #     if not self.level.is_not_wall(position) or self.level.is_coin(position) or self.level.is_door(position):
+    #         return False
         
-        # Avoid other robots
-        other_robots = {r.position for r in self.robots if r != robot}
-        if position in other_robots:
-            return False
-        return True
+    #     # Avoid other robots
+    #     other_robots = {r.position for r in self.robots if r != robot}
+    #     if position in other_robots:
+    #         return False
+    #     return True
             
             
 if __name__ == "__main__":
