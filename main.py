@@ -225,6 +225,20 @@ class InputHandler:
 
         return dx, dy, restart, quit_game
 
+    def wait_for_keypress(self, clock):
+        """
+        Blocks title screen until any key is pressed
+        """
+        waiting = True
+        while waiting:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    waiting = False
+                    return "quit"
+                if event.type == pygame.KEYDOWN:
+                    waiting = False
+            clock.tick(30)
+
 
 class GameState:
     def __init__(self, level, monster, robots):
@@ -290,7 +304,6 @@ class GameState:
             if robot.position == self.monster.position:
                 self.monster.is_caught = True
 
-    
     # -------------------- Validation -------------------- #
     def is_valid_monster_position(self, position: tuple) -> bool:
         """
@@ -310,387 +323,251 @@ class GameState:
         return position not in other_positions
 
 
-class GameApplication:
-    '''
-    GameApplication class for game state management.
-    '''
-    def __init__(self):
-        pygame.init()
+class Renderer:
+    def __init__(self, window, tile_scale_px):
+        self.window        = window
+        self.tile_scale_px = tile_scale_px
 
-        self.clock                  = pygame.time.Clock()
+        # Preload fonts
+        self.font_large  = pygame.font.SysFont("Arial", 150, bold=True)
+        self.font_medium = pygame.font.SysFont("Arial", 50)
+        self.font_small  = pygame.font.SysFont("Arial", 30)
+
+    # -------------------- Main draw -------------------- #
+    def draw(self, gamestate):
+        # set entire background to white (majority of tiles are white anyway)
+        self.window.fill((255, 255, 255))
         
-        self.level_num              = 0
-        self.last_robot_update_time = 0 
+        self.draw_map(gamestate.level)
+        self.draw_entities(gamestate.monster, gamestate.robots)
+        self.draw_ui(gamestate)
+
+        if gamestate.monster.is_caught:
+            self.draw_end_text()
         
-        self.input_handler          = InputHandler()
-        
-        self.running                = True
+        pygame.display.flip()
 
-# -------------------- Main Loop -------------------- #  
-
-    def run(self):
-        
-        # draw title screen
-        self.draw_title_screen()
-
-        # start first level
-        self.start_level()
-        
-        while self.running:
-            
-            print(f"Monster at {self.monster.position}, robots at {[r.position for r in self.robots]}")
-
-            dx, dy, restart, quit_game = self.input_handler.read_input()
-
-            # quits game
-            if quit_game:
-                self.running = False
-                break
-
-            # restart means: go back to level 0 and recreate the level
-            if restart:
-                self.level_num = 0
-                self.start_level()
-                continue
-
-            # regular level completion
-            if self.gamestate.level_finished:
-                self.start_level()
-                continue
-
-            current_time = pygame.time.get_ticks()
-
-            self.gamestate.try_move_monster(dx, dy)
-            
-            # delay robot movement
-            if current_time - self.last_robot_update_time >= self.robot_speed_ms:
-                self.gamestate.update_robots()
-                self.last_robot_update_time = current_time
-            
-            self.draw_main()
-
-            self.clock.tick(30)
-
+    # -------------------- Map -------------------- #
+    def draw_map(self, level):
+        for y, row in enumerate(level.level_map):
+            for x, tile in enumerate(row):
+                rect = pygame.Rect(x*self.tile_scale_px, y*self.tile_scale_px,
+                                     self.tile_scale_px,   self.tile_scale_px)
                 
-    # -------------------- Level Management -------------------- #
-            
-    def start_level(self):
-        """
-        Generate a new level and initialize all entities.
-        """
-        self.generate_level_map()
-        self.initiate_window()
+                # Draw tile background
+                if tile == level.WALL:
+                    pygame.draw.rect(self.window, (0,0,0), rect)
+                else:
+                    pygame.draw.rect(self.window, (255,255,255), rect)
 
-        self.seed_monster()
-        self.seed_robots()
-        
-        self.gamestate = GameState(level=self.level, monster=self.monster, robots=self.robots)
+                # Draw coins / doors
+                if tile == level.COIN:
+                    self.coin = pygame.image.load('coin.png')
+                    self._blit_center(self.coin, rect)
+                elif tile == level.DOOR:
+                    self.door = pygame.image.load('door.png')
+                    self._blit_center(self.door, rect)
 
-        self.last_robot_update_time = 0  # reset robot timer  
+                # Draw tile border
+                pygame.draw.rect(self.window, (128,128,128), rect, width=2)
+    
+    # -------------------- Entities -------------------- #
+    def draw_entities(self, monster, robots):
+        # Use monster.image from the monster instance
+        self._blit_center(monster.image, self._tile_rect(monster.position))
         
+        for robot in robots:
+            self._blit_center(robot.image, self._tile_rect(robot.position))
+        
+    # -------------------- UI -------------------- #
+    def draw_ui(self, gamestate):
+        level    = gamestate.level
+        monster  = gamestate.monster
+
+        w, h = level.win_size
+        y_offset = h * self.tile_scale_px + 20
+
+        # Level and coins collected
+        texts = [
+            (self.font_small, f"Level: {level.level_num}", (255,0,0), 1200),
+            (self.font_small, f"Coins: {monster.coins_carried}/{level.num_coins}", (0,0,255), 1600),
+            (self.font_small, "F2 = new game", (0,0,0), 100),
+            (self.font_small, "Esc = quit game", (0,0,0), 400)
+        ]
+
+        for font, text, color, x in texts:
+            surf = font.render(text, True, color)
+            self.window.blit(surf, (x, y_offset))
+
+        # Set window title
+        pygame.display.set_caption(f"MyGame - Level {level.level_num}")
+
+    # -------------------- Helpers -------------------- #
+    def _tile_rect(self, position):
+        x, y = position
+        return pygame.Rect(x*self.tile_scale_px, y*self.tile_scale_px,
+                             self.tile_scale_px,   self.tile_scale_px)
+
+    def _blit_center(self, image, rect):
+        x = rect.x + (self.tile_scale_px - image.get_width())/2
+        y = rect.y + (self.tile_scale_px - image.get_height())/2
+        self.window.blit(image, (x, y))
+
+    # -------------------- Screens -------------------- #
+    def draw_title_screen(self):
+        self.window.fill((0, 0, 0))
+        lines = [
+            (self.font_large, "You are the monster!"),
+            (self.font_medium, "Move with the arrow-keys and collect all coins without getting caught."),
+            (self.font_medium, "Good luck! :)"),
+            (self.font_small, "Press any key to start!")
+        ]
+        self._draw_centered_lines(lines)
+        pygame.display.flip()
+
+    def draw_end_text(self):
+        self.window.fill((0,0,0))
+        lines = [
+            (self.font_large, "You were caught!"),
+            (self.font_small, "<Please press F2 to restart or Esc to exit>")
+        ]
+        self._draw_centered_lines(lines)
+        pygame.display.flip()
+
+    def _draw_centered_lines(self, lines):
+        total_height = sum(font.size(text)[1] + 20 for font, text in lines)
+        start_y = self.tile_scale_px * 10 / 2 - total_height / 2  # adjust if map size changes
+        current_y = start_y
+        for font, text in lines:
+            surf = font.render(text, True, (255,0,0))
+            rect = surf.get_rect(center=(self.tile_scale_px*20/2, current_y))
+            self.window.blit(surf, rect)
+            current_y += surf.get_height() + 20
+
+
+class LevelManager:
+    def __init__(self, map_size, internal_walls):
+        self.map_size       = map_size
+        self.internal_walls = internal_walls
+        self.level_num      = 0
+
     def get_level_params(self):
-
         # linear growth with saturation
-        num_robots = min(5, 1 + (self.level_num - 1) // 2)  # 1 robot at level 1, +1 every 2 levels
-        num_coins  = min(10, 5 + 2 * ((self.level_num - 1) // 3))  # 5 coins at level 1, +2 every 3 levels
-
+        num_robots     = min(5, 1 + (self.level_num - 1) // 2)
+        num_coins      = min(10, 5 + 2 * ((self.level_num - 1) // 3))
+        
         # robot speed with lower limit
         robot_speed_ms = max(500, 2000 - 100 * self.level_num)
-   
+       
         return num_robots, num_coins, robot_speed_ms
 
-    def generate_level_map(self):
-        
+    def generate_level(self):
         # initiate level_map
         self.level_num += 1
-
-        self.num_robots, num_coins, self.robot_speed_ms = self.get_level_params()
-        self.level = Level(win_size=(20,10), num_internal_walls = 15, num_coins = num_coins, level_num = self.level_num)
-
-    def initiate_window(self):
-        # intiates window for display (each tile is of size (tile_scale_px x tile_scale_px) )
-        self.map_width, self.map_height     = self.level.win_size
-        self.tile_scale_px                  = 100
-
-        window_height = self.tile_scale_px * self.map_height
-        window_width  = self.tile_scale_px * self.map_width
         
-        self.window = pygame.display.set_mode((window_width, window_height + self.tile_scale_px))
+        num_robots, num_coins, robot_speed_ms = self.get_level_params()
+        level = Level( win_size=self.map_size, num_internal_walls=self.internal_walls, num_coins=num_coins, level_num=self.level_num )
+        
+        return level, num_robots, robot_speed_ms
 
-    def seed_monster(self):
+
+class EntitySpawner:
+    @staticmethod
+    def spawn_monster(level):
         """
         Randomly place the monster on a valid position.
-        NOTE: need to be sure that there are empty spaces left!!!
+        NOTE: need to be sure that there are walkable empty spaces left!!!
         """
         while True:
-            initial_position = (randint(0, self.map_width - 1), randint(0, self.map_height - 1))
-            
-            if self.level.is_walkable(initial_position):
-                self.monster = Monster(position=initial_position)
-                break
+            pos = (randint(0, level.win_size[0]-1), randint(0, level.win_size[1]-1))
+            if level.is_walkable(pos):
+                return Monster(pos)
 
-    def seed_robots(self):
+    @staticmethod
+    def spawn_robots(level, monster_pos, num_robots, robot_speed_ms, min_distance=3):
         """
         Place robots at valid positions:
         - Cannot be on walls, coins, doors, or monster
         - Cannot overlap with other robots
+        - cannot be spawned within min_distance to monster
         """
-        self.robots = []
-        used_positions = {self.monster.position}
-
-        while len(self.robots) < self.num_robots:
-            pos = ( randint(0, self.map_width - 1), randint(0, self.map_height - 1) )
-
-            if self.level.is_spawnable(pos) and pos not in used_positions:
-                robot = Robot(position=pos, robot_speed_ms=self.robot_speed_ms)
-                self.robots.append(robot)
+        robots = []
+        used_positions = {monster_pos}
+        while len(robots) < num_robots:
+            pos = (randint(0, level.win_size[0]-1), randint(0, level.win_size[1]-1))
+            if (level.is_spawnable(pos) and pos not in used_positions and max(abs(pos[0]-monster_pos[0]), abs(pos[1]-monster_pos[1])) >= min_distance):
+                robots.append(Robot(pos, robot_speed_ms))
                 used_positions.add(pos)
+        return robots
 
-    # -------------------- Drawing -------------------- #
 
-    def draw_main(self):
-        # set entire background to white (majority of tiles are white anyway)
-        self.window.fill((255, 255, 255))
+class GameApplication:
+    def __init__(self):
+        pygame.init()
+
+        self.clock                  = pygame.time.Clock()
+        self.input_handler          = InputHandler()
+        self.running                = True
+        self.level_manager          = LevelManager(map_size=(20,10), internal_walls=15)
+        self.last_robot_update_time = 0
+
+        # Initialize window & renderer
+        self.tile_scale_px              = 100
+        self.map_width, self.map_height = self.level_manager.map_size
+        window_width                    = self.map_width * self.tile_scale_px
+        window_height                   = self.map_height * self.tile_scale_px + self.tile_scale_px
+        self.window                     = pygame.display.set_mode((window_width, window_height))
+        self.renderer                   = Renderer(self.window, self.tile_scale_px)
+
+    def run(self):
+        # Draw title screen first (waits for key)
+        self.renderer.draw_title_screen()
+        if self.input_handler.wait_for_keypress(self.clock) == "quit":
+            self.running = False
+            return
+
+        # Start the first level
+        self.start_level()
+
+        # run game loop
+        while self.running:
+            self.game_loop()
+
+    def game_loop(self):
+        # read input
+        dx, dy, restart, quit_game = self.input_handler.read_input()
         
-        self.draw_map()
-        self.draw_monster()
-        self.draw_robots()
-        self.draw_window_text()
+        if quit_game:
+            self.running = False
+            return
+        if restart:
+            self.level_manager.level_num = 0
+            self.start_level()
+            return
+        if self.gamestate.level_finished:
+            self.start_level()
+            return
 
-        if self.monster.is_caught:
-            self.draw_end_text()
-            
-        pygame.display.flip()
-    
-    def draw_map(self):
-        for y in range(self.map_height):
-            for x in range(self.map_width):
-                tile = self.level.level_map[y][x]
-                rect = pygame.Rect(x*self.tile_scale_px, y*self.tile_scale_px, self.tile_scale_px, self.tile_scale_px)
+        # Delay robot movement
+        current_time = pygame.time.get_ticks()
+        self.gamestate.try_move_monster(dx, dy)
+        if not self.gamestate.level_finished and current_time - self.last_robot_update_time >= self.robot_speed_ms:
+            self.gamestate.update_robots()
+            self.last_robot_update_time = current_time
 
-                # walls
-                if tile == self.level.WALL:
-                    pygame.draw.rect(self.window, (0, 0, 0), rect)
+        # Draw everything
+        self.renderer.draw(self.gamestate)
+        self.clock.tick(30)
 
-                # empty tiles
-                elif tile == self.level.EMPTY:
-                    pygame.draw.rect(self.window, (255, 255, 255), rect)
-
-                # door
-                elif tile == self.level.DOOR:
-                    self.door = pygame.image.load('door.png')
-                    self.window.blit(self.door, 
-                                     ( x*self.tile_scale_px + (self.tile_scale_px - self.door.get_width())/2, 
-                                       y*self.tile_scale_px + (self.tile_scale_px - self.door.get_height())/2 )
-                                    )
-
-                # coins                    
-                elif tile == self.level.COIN:
-                    self.coin = pygame.image.load('coin.png')
-                    self.window.blit(self.coin, 
-                                     ( x*self.tile_scale_px + (self.tile_scale_px - self.coin.get_width())/2, 
-                                       y*self.tile_scale_px + (self.tile_scale_px - self.coin.get_height())/2 )
-                                    )
-                
-                # Draw grey border on top of every tile
-                pygame.draw.rect(self.window, (128, 128, 128), rect, width=2)
-
-    def draw_monster(self):
-        monster_x, monster_y = self.monster.position
-        self.window.blit(self.monster.image, (monster_x*self.tile_scale_px + (self.tile_scale_px - self.monster.image.get_width())/2, 
-                                              monster_y*self.tile_scale_px + (self.tile_scale_px - self.monster.image.get_height())/2)
-                        )
-
-    def draw_robots(self):
-        for robot in self.robots:
-            robot_x, robot_y = robot.position
-            self.window.blit(robot.image, (robot_x*self.tile_scale_px + (self.tile_scale_px - robot.image.get_width())/2, 
-                                           robot_y*self.tile_scale_px + (self.tile_scale_px - robot.image.get_height())/2)
-                            )
-
-    def draw_title_screen(self):
-        # Ensure window exists
-        if not hasattr(self, "window") or self.window is None:
-            self.map_width     = 20
-            self.map_height    = 10
-            self.tile_scale_px = 100
-            window_width       = self.map_width * self.tile_scale_px
-            window_height      = self.map_height * self.tile_scale_px
-            self.window        = pygame.display.set_mode((window_width, window_height + self.tile_scale_px))
-
-        # Fill background
-        self.window.fill((0, 0, 0))
-
-        # Fonts
-        font1 = pygame.font.SysFont("Arial", 150, bold=True)
-        font2 = pygame.font.SysFont("Arial", 50)
-        font3 = pygame.font.SysFont("Arial", 30)
-
-        # Lines to display
-        lines = [
-            (font1, "You are the monster!"),
-            (font2, "Move with the arrow-keys and collect all coins without getting caught."),
-            (font2, "Good luck! :)"),
-            (font3, "Press any key to start!")
-        ]
-
-        # Draw lines with consistent spacing
-        start_y = self.map_height * self.tile_scale_px / 2 - 150  # adjust start vertically if needed
-        spacing = 20  # pixels between lines
-        current_y = start_y
-
-        for font, line in lines:
-            text_surface = font.render(line, True, (255, 0, 0))
-            text_rect = text_surface.get_rect(center=(self.map_width*self.tile_scale_px/2, current_y))
-            self.window.blit(text_surface, text_rect)
-            current_y += text_surface.get_height() + spacing
-
-        pygame.display.flip()
-
-        # Wait until a keypress
-        waiting = True
-        while waiting:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    waiting = False
-                elif event.type == pygame.KEYDOWN:
-                    waiting = False
-            self.clock.tick(30)
-
-
-    def draw_window_text(self):
-        self.font = pygame.font.SysFont("Arial", 30)
-
-        # update text in window
-        text = self.font.render("F2 = new game", True, (0, 0, 0))
-        self.window.blit(text, (100, self.map_height * self.tile_scale_px + 20))
-
-        text = self.font.render("Esc = quit game", True, (0, 0, 0))
-        self.window.blit(text, (400, self.map_height * self.tile_scale_px + 20))
-
-        text = self.font.render(f"Level: {self.level_num}", True, (255, 0, 0))
-        self.window.blit(text, (1200, self.map_height * self.tile_scale_px + 20))
-
-        text = self.font.render(f"Coins collected: {self.monster.coins_carried}/{self.level.num_coins}", True, (0, 0, 255))
-        self.window.blit(text, (1600, self.map_height * self.tile_scale_px + 20))
-
-        # set display name
-        pygame.display.set_caption(f"MyGame - Level {self.level_num}")
-
-    def draw_end_text(self):
-        self.window.fill((0, 0, 0))
-    
-        font1 = pygame.font.SysFont("Arial", 150, bold=True)
-        font2 = pygame.font.SysFont("Arial", 30)
-
-        lines = [(font1, "You were caught!"), (font2, "<Please press F2 to restart or Esc to exit>")]
-
-        for ii, (font, line) in enumerate(lines):
-            text_surface = font.render(line, True, (255, 0, 0))
+    def start_level(self):
+        self.level, self.num_robots, self.robot_speed_ms = self.level_manager.generate_level()
         
-            text_rect = text_surface.get_rect(center=(self.map_width*self.tile_scale_px/2,
-                                                    self.map_height*self.tile_scale_px/2 + 3*ii*font.get_height()))
-            self.window.blit(text_surface, text_rect)
-                
+        self.monster                = EntitySpawner.spawn_monster(self.level)
+        self.robots                 = EntitySpawner.spawn_robots(self.level, self.monster.position, self.num_robots, self.robot_speed_ms)
+        self.gamestate              = GameState(level=self.level, monster=self.monster, robots=self.robots)
+        self.last_robot_update_time = 0
 
-# -------------------- Game Logic -------------------- #
 
-    # def update_monster(self, dx: int, dy: int):
-    #     """
-    #     Handles monster movement:
-    #     - Validate move
-    #     - Coin collection
-    #     - Door/level completion
-    #     - Collision with robots
-    #     """
-    #     proposed_position    = self.monster.propose_move(dx, dy)
-        
-    #     # validate move
-    #     if self.is_valid_monster_position(proposed_position):
-    #         self.monster.move_to(proposed_position)
-
-    #     # coin collection (Coins are not moving and can therefore be checked directly in the instance of the Level class)
-    #     if self.level.is_coin(proposed_position):
-    #         self.monster.coins_carried += 1
-    #         self.level.level_map[proposed_position[1]][proposed_position[0]] = ' '
-        
-    #     # Door/level completion (Doors are not moving and can therefore be checked directly in the instance of the Level class)
-    #     if self.level.is_door(proposed_position) and (self.monster.coins_carried == self.level.num_coins):
-    #         self.level.level_map[proposed_position[1]][proposed_position[0]] = ' '
-    #         self.level_finished = True
-
-    #     # monster collides with robots
-    #     robot_positions = {robot.position for robot in self.robots}
-    #     if proposed_position in robot_positions:
-    #         # Monster is caught by robot
-    #         self.monster.is_caught = True
-
-    # def update_robots(self):
-    #     """
-    #     Moves all robots:
-    #     - Propose moves
-    #     - Validate against walls, doors, other robots
-    #     - Update positions
-    #     - Detect if monster is caught
-    #     """
-    #     for robot in self.robots:
-    #         possible_robot_moves = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-
-    #         valid_positions = []
-
-    #         for dx, dy in possible_robot_moves:
-    #             proposed_position = robot.propose_move(dx, dy)
-
-    #             if self.is_valid_robot_position(proposed_position, robot):
-    #                 valid_positions.append(proposed_position)
-
-    #         if valid_positions:
-    #             monster_x, monster_y = self.monster.position
-                
-    #             # move towards monster
-    #             robot.position = min(
-    #                 valid_positions,
-    #                 key=lambda pos: sqrt((monster_x - pos[0])**2 + (monster_y - pos[1])**2)
-    #             )
-    #         else:
-    #             # robot is stuck; optionally pick a random valid move if any
-    #             fallback_positions = [robot.propose_move(dx, dy)
-    #                 for dx, dy in possible_robot_moves
-    #                 if self.validated_position(robot.propose_move(dx, dy))]
-    #             if fallback_positions:
-    #                robot.position = choice(fallback_positions)
-
-    #         # a robot caught the monster    
-    #         if proposed_position == (self.monster.position):
-    #             # Monster is caught by robot
-    #             self.monster.is_caught = True
-                
-    # def is_valid_monster_position(self, position: tuple):
-    #     """
-    #     Monster can move anywhere except walls.
-    #     """
-    #     return self.level.is_not_wall(position)
-
-    # def is_valid_robot_position(self, position: tuple, robot: "Robot"):
-    #     """
-    #     Robot cannot move into walls, doors, coins, or other robots.
-    #     """
-    #     if not self.level.is_not_wall(position) or self.level.is_coin(position) or self.level.is_door(position):
-    #         return False
-        
-    #     # Avoid other robots
-    #     other_robots = {r.position for r in self.robots if r != robot}
-    #     if position in other_robots:
-    #         return False
-    #     return True
-            
-            
 if __name__ == "__main__":
     game = GameApplication()
     game.run()
-
-    # level = Level(win_size=(20,9), num_internal_walls = 15, num_coins=5, level_num=1)
-    # print(level)
-
-    
