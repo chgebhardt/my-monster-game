@@ -145,7 +145,6 @@ class Robot:
     def __init__(self, position: tuple, robot_speed_ms: int):
         self.position          = position
         self.speed_ms          = robot_speed_ms
-        self.last_move_time_ms = 0
 
         self.image = pygame.image.load("robot.png")
 
@@ -178,7 +177,7 @@ class InputHandler:
             pygame.K_RIGHT: (1, 0),
         }
 
-    def process_events(self):
+    def read_input(self):
         dx, dy    = 0, 0
         restart   = False
         quit_game = False
@@ -189,7 +188,6 @@ class InputHandler:
                 quit_game = True
 
             elif event.type == pygame.KEYDOWN:
-
                 # movement
                 if event.key in self.keymap:
                     dx, dy = self.keymap[event.key]
@@ -238,7 +236,7 @@ class GameApplication:
             
             print(f"Monster at {self.monster.position}, robots at {[r.position for r in self.robots]}")
 
-            dx, dy, restart, quit_game = self.input_handler.process_events()
+            dx, dy, restart, quit_game = self.input_handler.read_input()
 
             # quits game
             if quit_game:
