@@ -1,10 +1,3 @@
-# Complete your game here
-
-# * Concept
-#   You play as the monster. Coins are "packages" you need to collect and deliver to the door. 
-#   Robots act as patrolling obstacles that try to catch you. 
-#   The goal is to gather coins and reach the door without getting caught.
-
 import pygame
 from random import randint, choice, sample
 from math import sqrt
