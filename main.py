@@ -4,9 +4,7 @@ from math import sqrt
 
 class Level:
     """
-    This class generates a randomized level map
-    NOTE: this can create maps that are not solveable eg if door access is blocked by internal walls
-          -> maybe use flood fill / BFS / DFS to check that all empty tiles are accessible after an internal wall tile was placed?
+    This class generates a valid randomized level map
     """ 
 
     WALL  = '#'
@@ -23,21 +21,32 @@ class Level:
         # The map[y][x] contains WALL, EMPTY, COIN, or DOOR
         self._generate_map()
 
-    def _generate_map(self):
-        # create empty map
-        self.level_map = self._create_empty_map()
 
-        # add external walls
-        self._add_external_walls()
+    def _generate_map(self, max_attempts=20):
+        
+        for attempt in range(1, max_attempts + 1):
+            # create empty map
+            self.level_map = self._create_empty_map()
 
-        # add internal walls
-        self._place_items(self.WALL, count = self.num_internal_walls)
+            # add external walls
+            self._add_external_walls()
 
-        # add exit door
-        self._place_items(self.DOOR, count = 1)
+            # add internal walls
+            self._place_items(self.WALL, count=self.num_internal_walls)
 
-        # add coins
-        self._place_items(self.COIN, count = self.num_coins)
+            # add exit door
+            self._place_items(self.DOOR, count=1)
+
+            # add coins
+            self._place_items(self.COIN, count=self.num_coins)
+
+            # check if map is valid
+            if self.valid_map():
+                return  # exit the function if valid
+
+        # If we reach here, all attempts failed
+        raise RuntimeError(f"Failed to generate a valid map after {max_attempts} attempts")
+
 
     def _create_empty_map(self):
         w, h = self.win_size
@@ -60,11 +69,14 @@ class Level:
         w, h = self.win_size
         return [(x, y) for y in range(1, h - 1) for x in range(1, w - 1) if self.level_map[y][x] == self.EMPTY]
 
+    def _get_all_walkable_positions(self):
+        w, h = self.win_size
+        return [(x, y) for y in range(1, h - 1) for x in range(1, w - 1) if self.level_map[y][x] != self.WALL]
+
     def _place_items(self, symbol, count):
         empty = self._get_empty_positions()
         if count > len(empty):
             raise ValueError(f"Not enough space for {symbol}")
-
         for x, y in sample(empty, count):
             self.level_map[y][x] = symbol
 
@@ -109,6 +121,35 @@ class Level:
             return False
         return True
 
+    def valid_map(self):
+        """
+        Using Breadth-First-Search (BFS) to estimate if every field in the generated map can be accessed
+        """
+        
+        def get_neighbors(position):
+            x, y = position
+            # return positions for up, down, left, right
+            return [(x+1, y), (x-1, y), (x, y+1), (x, y-1)]
+
+        visited = set()  # keep track of visited cells
+
+        queue   = [choice(self._get_all_walkable_positions())] # search starts with randomly chosen walkable field 
+
+        while queue:
+            current = queue.pop(0)  # always choose the first element with pop(0) for BFS 
+
+            # skip if already visited
+            if current in visited:
+                continue
+
+            visited.add(current)
+
+            # for each neighbor in the 4 directions
+            for neighbor in get_neighbors(current):
+                if self.is_walkable(neighbor) and neighbor not in visited:
+                    queue.append(neighbor)
+
+        return visited == set(self._get_all_walkable_positions())
         
     def __str__(self):
         """
@@ -564,3 +605,8 @@ class GameApplication:
 if __name__ == "__main__":
     game = GameApplication()
     game.run()
+
+    # level = Level( win_size = (20,10), num_internal_walls=25, num_coins = 5, level_num=1 )
+    # print(level)
+
+    # print(level.valid_map())
